@@ -1,0 +1,191 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function profile(uid) {
+      return get(/databases/$(database)/documents/profiles/$(uid)).data;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && profile(request.auth.uid).role == 'admin'
+        && profile(request.auth.uid).suspended != true;
+    }
+
+    function isSupplier() {
+      return signedIn()
+        && profile(request.auth.uid).role == 'supplier'
+        && profile(request.auth.uid).suspended != true;
+    }
+
+    function isAssignedCustomer(customerId) {
+      return isSupplier()
+        && profile(customerId).role == 'customer'
+        && profile(customerId).supplierId == request.auth.uid
+        && profile(customerId).suspended != true;
+    }
+
+    function isActiveDeliveryCustomer(customerId) {
+      return isAssignedCustomer(customerId)
+        && profile(customerId).deliverySuspended != true;
+    }
+
+    function validDelivery(customerId) {
+      let customer = profile(customerId);
+      let data = request.resource.data;
+      return data.keys().hasAll([
+          'customerId',
+          'customerName',
+          'supplierId',
+          'supplierName',
+          'deliveryDate',
+          'status',
+          'quantity',
+          'unitPrice',
+          'amount',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'customerId',
+          'customerName',
+          'supplierId',
+          'supplierName',
+          'deliveryDate',
+          'status',
+          'quantity',
+          'unitPrice',
+          'amount',
+          'updatedAt'
+        ])
+        && data.customerId == customerId
+        && data.supplierId == request.auth.uid
+        && data.deliveryDate is string
+        && data.status in ['delivered', 'not_home']
+        && data.quantity is int
+        && data.unitPrice is number
+        && data.amount is number
+        && data.quantity >= 0
+        && data.unitPrice == customer.bottlePrice
+        && data.updatedAt == request.time
+        && isActiveDeliveryCustomer(customerId)
+        && (
+          (data.status == 'delivered'
+            && data.quantity == customer.dailyQuantity
+            && data.amount == data.quantity * data.unitPrice)
+          || (data.status == 'not_home'
+            && data.quantity == 0
+            && data.amount == 0)
+        );
+    }
+
+    function validPayment(customerId) {
+      let data = request.resource.data;
+      return data.keys().hasAll([
+          'customerId',
+          'customerName',
+          'supplierId',
+          'supplierName',
+          'amount',
+          'method',
+          'paymentDate',
+          'recordedAt',
+          'status'
+        ])
+        && data.keys().hasOnly([
+          'customerId',
+          'customerName',
+          'supplierId',
+          'supplierName',
+          'amount',
+          'method',
+          'note',
+          'paymentDate',
+          'recordedAt',
+          'status'
+        ])
+        && data.customerId == customerId
+        && data.supplierId == request.auth.uid
+        && data.amount is number
+        && data.amount > 0
+        && data.method in ['cash', 'bank_transfer']
+        && data.paymentDate is string
+        && data.recordedAt == request.time
+        && data.status == 'received'
+        && isAssignedCustomer(customerId);
+    }
+
+    match /profiles/{uid} {
+      allow read: if (signedIn() && request.auth.uid == uid)
+        || isAdmin()
+        || (isSupplier()
+          && resource.data.role == 'customer'
+          && resource.data.supplierId == request.auth.uid);
+      allow write: if isAdmin();
+    }
+
+    match /deliveries/{deliveryId} {
+      allow read: if isAdmin()
+        || (signedIn()
+          && (resource.data.customerId == request.auth.uid
+            || resource.data.supplierId == request.auth.uid));
+
+      allow create: if isAdmin()
+        || (validDelivery(request.resource.data.customerId)
+          && deliveryId
+            == request.resource.data.deliveryDate
+              + '_'
+              + request.resource.data.customerId);
+
+      allow update: if isAdmin()
+        || (resource.data.status == 'not_home'
+          && validDelivery(request.resource.data.customerId)
+          && deliveryId
+            == request.resource.data.deliveryDate
+              + '_'
+              + request.resource.data.customerId);
+
+      allow delete: if isAdmin();
+    }
+
+    match /payments/{paymentId} {
+      allow read: if isAdmin()
+        || (signedIn()
+          && (resource.data.customerId == request.auth.uid
+            || resource.data.supplierId == request.auth.uid));
+      allow create: if isAdmin()
+        || validPayment(request.resource.data.customerId);
+      allow update, delete: if isAdmin();
+    }
+
+    match /products/{productId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /stockMovements/{movementId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /sales/{saleId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasAll([
+          'saleId',
+          'items',
+          'total',
+          'paymentMethod',
+          'createdAt',
+          'createdBy'
+        ])
+        && request.resource.data.saleId == saleId
+        && request.resource.data.total is number
+        && request.resource.data.total >= 0
+        && request.resource.data.paymentMethod == 'cash'
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.createdBy == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+  }
+}

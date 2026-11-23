@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "344788858465",
+    "project_id": "aquaflow002",
+    "storage_bucket": "aquaflow002.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:344788858465:android:efc63c5d7b9bd97d311c20",
+        "android_client_info": {
+          "package_name": "com.example.aquaflow"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCIvG4bzq9It54Efc_rk_6uiN1pYM2aGqI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
